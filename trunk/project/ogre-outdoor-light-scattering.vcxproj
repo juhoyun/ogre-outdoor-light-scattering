@@ -86,9 +86,17 @@
   <ItemGroup>
     <ClInclude Include="..\src\ExampleApplication.h" />
     <ClInclude Include="..\src\ExampleFrameListener.h" />
+    <ClInclude Include="..\src\LightSctrPostProcess.h" />
+    <ClInclude Include="..\src\OutdoorLightScattering.h" />
+    <ClInclude Include="..\src\prerequisites.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\src\LightSctrPostProcess.cpp" />
     <ClCompile Include="..\src\main.cpp" />
+    <ClCompile Include="..\src\OutdoorLightScattering.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\src\Structures.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -4,6 +4,9 @@
 #include "windows.h"
 #include "Ogre.h"
 
+#include "OutdoorLightScattering.h"
+#include "LightSctrPostProcess.h"
+
 using namespace Ogre;
 
 class TestFrameListener : public ExampleFrameListener
@@ -37,6 +40,9 @@ public:
 	}
 
 protected:
+
+	COutdoorLightScatteringSample* mSample;
+
 	virtual void createFrameListener(void)
 	{
 		mFrameListener= new TestFrameListener(mSceneMgr, mWindow, mCamera);
@@ -50,6 +56,9 @@ protected:
 		mCamera->lookAt(0, 0, -1);
 		mCamera->setNearClipDistance(1);
 		mCamera->setFarClipDistance(1000);
+
+		mSample = new COutdoorLightScatteringSample();
+		mSample->Create();
 	}
 };
 

@@ -21,10 +21,30 @@
     <ClInclude Include="..\src\ExampleFrameListener.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\OutdoorLightScattering.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\prerequisites.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\LightSctrPostProcess.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\src\main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\OutdoorLightScattering.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\LightSctrPostProcess.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\src\Structures.h">
+      <Filter>Header Files</Filter>
+    </None>
   </ItemGroup>
 </Project>
