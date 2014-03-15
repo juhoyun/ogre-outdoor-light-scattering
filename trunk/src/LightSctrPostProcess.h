@@ -5,12 +5,13 @@
 namespace Ogre
 {
 	class SceneManager;
+	class Camera;
 }
 
 class CLightSctrPostProcess
 {
 public:
-	CLightSctrPostProcess();
+	CLightSctrPostProcess(SceneManager* scnMgr);
 	~CLightSctrPostProcess();
 
 	void OnCreateDevice();
@@ -28,4 +29,5 @@ private:
 	SAirScatteringAttribs m_MediaParams;
 
 	Ogre::SceneManager* mSceneMgr;
+	Ogre::Camera* mRtCam;
 };

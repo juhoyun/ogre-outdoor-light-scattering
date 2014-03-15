@@ -57,7 +57,7 @@ protected:
 		mCamera->setNearClipDistance(1);
 		mCamera->setFarClipDistance(1000);
 
-		mSample = new COutdoorLightScatteringSample();
+		mSample = new COutdoorLightScatteringSample(mSceneMgr);
 		mSample->Create();
 	}
 };

@@ -4,9 +4,9 @@
 
 #include <string>
 
-COutdoorLightScatteringSample::COutdoorLightScatteringSample()
+COutdoorLightScatteringSample::COutdoorLightScatteringSample(Ogre::SceneManager* scnMgr)
 {
-	m_pLightSctrPP = new CLightSctrPostProcess;
+	m_pLightSctrPP = new CLightSctrPostProcess(scnMgr);
 }
 
 COutdoorLightScatteringSample::~COutdoorLightScatteringSample()

@@ -1,11 +1,15 @@
 #pragma once
 
+namespace Ogre
+{
+	class SceneManager;
+}
 class CLightSctrPostProcess;
 
 class COutdoorLightScatteringSample
 {
 public:
-	COutdoorLightScatteringSample();
+	COutdoorLightScatteringSample(Ogre::SceneManager* scnMgr);
 	virtual ~COutdoorLightScatteringSample();
 
 	virtual void Create();

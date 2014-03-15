@@ -1,15 +1,12 @@
 #include "LightSctrPostProcess.h"
 
-#include "OgreVector4.h"
-#include "OgreTextureManager.h"
-#include "OgreRenderTexture.h"
-#include "OgreHardwarePixelBuffer.h"
-#include "OgreCamera.h"
+#include "Ogre.h"
 
 using namespace Ogre;
 
-CLightSctrPostProcess::CLightSctrPostProcess() :
-	m_fTurbidity(1.02f)
+CLightSctrPostProcess::CLightSctrPostProcess(SceneManager* scnMgr) :
+	m_fTurbidity(1.02f),
+	mSceneMgr(scnMgr)
 {
 	ComputeScatteringCoefficients();
 }
@@ -20,11 +17,18 @@ CLightSctrPostProcess :: ~CLightSctrPostProcess()
 
 void CLightSctrPostProcess::OnCreateDevice()
 {
+	mRtCam = new Camera("rtCam", mSceneMgr);
+	mRtCam->setProjectionType(ProjectionType::PT_ORTHOGRAPHIC);
+	mRtCam->setNearClipDistance(0.1f);
+	mRtCam->setFarClipDistance(0.2f);
+
 	CreatePrecomputedOpticalDepthTexture();
 }
 
 void CLightSctrPostProcess::OnDestroyDevice()
 {
+	delete mRtCam;
+	mRtCam = 0;
 }
 
 bool CLightSctrPostProcess::CreatePrecomputedOpticalDepthTexture()
@@ -33,15 +37,16 @@ bool CLightSctrPostProcess::CreatePrecomputedOpticalDepthTexture()
 		ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME,
 		TEX_TYPE_2D, sm_iNumPrecomputedHeights, sm_iNumPrecomputedAngles,
 		0, PixelFormat::PF_FLOAT32_GR, TU_RENDERTARGET);
-	Camera* rtCam = new Camera("rtCam", mSceneMgr);
-	rtCam->setProjectionType(ProjectionType::PT_ORTHOGRAPHIC);
-	rtCam->setNearClipDistance(0.1f);
-	rtCam->setFarClipDistance(0.2f);
+	
 	RenderTexture* rt = rtTex->getBuffer()->getRenderTarget();
-	rt->addViewport(rtCam);
-	rt->getViewport(0)->setAutoUpdated(false);
-	rt->getViewport(0)->setClearEveryFrame(false);
+	rt->addViewport(mRtCam);
+	Viewport* viewport = rt->getViewport(0);
+	viewport->setAutoUpdated(false);
+	viewport->setClearEveryFrame(false);
 	rt->setAutoUpdated(false);
+	// attach the compositor
+	CompositorManager::getSingleton().addCompositor(viewport, "Compositor/NetDensityToAtmTop");
+	CompositorManager::getSingleton().setCompositorEnabled(viewport, "Compositor/NetDensityToAtmTop", true);
 	rt->update();
 	return true;
 }
