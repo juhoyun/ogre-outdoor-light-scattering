@@ -13,7 +13,7 @@ vertex_program cg/StdQuad_vp cg
 fragment_program cg/NetDensityToAtmTop cg
 {
     source NetDensityToAtmTop.cg
-    entry_point main_fp
+    entry_point PrecomputeNetDensityToAtmTopPS
     profiles ps_3_0 arbfp1
 }
 
