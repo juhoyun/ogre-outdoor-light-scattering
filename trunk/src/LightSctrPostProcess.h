@@ -6,7 +6,10 @@ namespace Ogre
 {
 	class SceneManager;
 	class Camera;
-}
+	class SceneNode;
+	class RenderTexture;
+	class Entity;
+};
 
 class CLightSctrPostProcess
 {
@@ -30,4 +33,8 @@ private:
 
 	Ogre::SceneManager* mSceneMgr;
 	Ogre::Camera* mRtCam;
+	Ogre::SceneNode* mQuadNode;
+	Ogre::Entity* mQuadEntity;
+
+	void RenderQuad(const char* matName, RenderTexture* rt);
 };

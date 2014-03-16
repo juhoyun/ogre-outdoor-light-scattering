@@ -17,12 +17,31 @@ CLightSctrPostProcess :: ~CLightSctrPostProcess()
 
 void CLightSctrPostProcess::OnCreateDevice()
 {
-	mRtCam = new Camera("rtCam", mSceneMgr);
+	//mRtCam = new Camera("rtCam", mSceneMgr);
+	mRtCam = mSceneMgr->createCamera("RtCam");
 	mRtCam->setProjectionType(ProjectionType::PT_ORTHOGRAPHIC);
-	mRtCam->setNearClipDistance(0.1f);
-	mRtCam->setFarClipDistance(0.2f);
+	mRtCam->setNearClipDistance(1);
+	mRtCam->setFarClipDistance(3000);
+	mRtCam->setPosition(0, 0, 0);
+	mRtCam->setDirection(0, 0, -1);
+	mRtCam->setOrthoWindow(2, 2);
+
+	Plane quadPlane;
+	quadPlane.normal = Vector3::UNIT_Z;
+	quadPlane.d = 0;
+	Ogre::MeshManager::getSingleton().createPlane("QuadPlane",
+		Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME, quadPlane, 2, 2);
+	mQuadEntity = mSceneMgr->createEntity("QuadEntity", "QuadPlane");
+	mQuadEntity->setCastShadows(false);
+
+	mQuadNode = mSceneMgr->getRootSceneNode()->createChildSceneNode();
+	mQuadNode->attachObject(mQuadEntity);
+	mQuadNode->setPosition(0, 0, -2);
 
 	CreatePrecomputedOpticalDepthTexture();
+
+	// disable till the next render quad
+	mQuadNode->setVisible(false);
 }
 
 void CLightSctrPostProcess::OnDestroyDevice()
@@ -31,23 +50,45 @@ void CLightSctrPostProcess::OnDestroyDevice()
 	mRtCam = 0;
 }
 
+void CLightSctrPostProcess::RenderQuad(const char* matName, RenderTexture* rt)
+{
+	mQuadEntity->setMaterialName(matName);
+
+	Viewport* viewport = rt->addViewport(mRtCam);
+	viewport->setClearEveryFrame(false);
+	viewport->setOverlaysEnabled(false);
+	// viewport auto update must be turned on for RenderTarget::update()
+	rt->update();
+	rt->setAutoUpdated(false);
+#if 0
+	// save to a file for debug
+	size_t imgSize = 4 * 4 * PixelUtil::getNumElemBytes(PF_FLOAT32_GR);
+	uchar *data = new uchar[imgSize];
+	PixelBox pb(4, 4, 1, PF_FLOAT32_GR, data);
+	rt->copyContentsToMemory(pb, RenderTarget::FB_AUTO);
+	FILE *fp = fopen("NetDensityToAtmTop.txt", "w");
+	if (fp)
+	{
+		//fwrite(data, imgSize, 1, fp);
+		float *p = (float *)data;
+		for (size_t i = 0; i < imgSize / 8; i++, p += 2)
+			fprintf(fp, "[%d,%d] %f %f\n", i / 4, i % 4, p[0], p[1]);
+		fclose(fp);
+	}
+	delete[] data;
+#endif
+}
+
 bool CLightSctrPostProcess::CreatePrecomputedOpticalDepthTexture()
 {
 	TexturePtr rtTex = TextureManager::getSingleton().createManual("NetDensityToAtmTopTex",
-		ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME,
-		TEX_TYPE_2D, sm_iNumPrecomputedHeights, sm_iNumPrecomputedAngles,
-		0, PixelFormat::PF_FLOAT32_GR, TU_RENDERTARGET);
-	
-	RenderTexture* rt = rtTex->getBuffer()->getRenderTarget();
-	rt->addViewport(mRtCam);
-	Viewport* viewport = rt->getViewport(0);
-	viewport->setAutoUpdated(false);
-	viewport->setClearEveryFrame(false);
-	rt->setAutoUpdated(false);
-	// attach the compositor
-	CompositorManager::getSingleton().addCompositor(viewport, "Compositor/NetDensityToAtmTop");
-	CompositorManager::getSingleton().setCompositorEnabled(viewport, "Compositor/NetDensityToAtmTop", true);
-	rt->update();
+		ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME, TEX_TYPE_2D,
+		sm_iNumPrecomputedHeights, sm_iNumPrecomputedAngles,
+		//4, 4,
+		0, PF_FLOAT32_GR, TU_RENDERTARGET);
+
+	RenderQuad("Material/NetDensityToAtmTop", rtTex->getBuffer()->getRenderTarget());
+
 	return true;
 }
 

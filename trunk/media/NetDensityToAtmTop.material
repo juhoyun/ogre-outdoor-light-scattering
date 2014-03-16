@@ -1,0 +1,56 @@
+vertex_program cg/StdQuad_vp cg
+{
+    source StdQuad_vp.cg
+    entry_point StdQuad_vp
+    profiles vs_4_0 vs_1_1 arbvp1
+
+    default_params
+    {
+        param_named_auto worldViewProj worldviewproj_matrix
+    }
+}
+
+fragment_program cg/NetDensityToAtmTop cg
+{
+    source NetDensityToAtmTop.cg
+    entry_point main_fp
+    profiles ps_3_0 arbfp1
+}
+
+material Material/NetDensityToAtmTop
+{
+    technique
+    {
+        pass
+        {
+            cull_hardware none
+            cull_software none
+            depth_check off
+            lighting off
+            
+            vertex_program_ref cg/StdQuad_vp {}
+            fragment_program_ref cg/NetDensityToAtmTop {}
+        }
+    }
+}
+
+material QuadTestMaterial
+{
+    technique
+    {
+        pass
+        {
+            cull_hardware none
+            cull_software none
+            depth_check off
+            lighting off
+
+            texture_unit
+            {
+                texture NetDensityToAtmTopTex
+                tex_address_mode clamp
+                filtering none
+            }
+        }
+    }
+}
