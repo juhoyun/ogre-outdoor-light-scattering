@@ -2,7 +2,7 @@ vertex_program cg/StdQuad_vp cg
 {
     source StdQuad_vp.cg
     entry_point StdQuad_vp
-    profiles vs_4_0 vs_1_1 arbvp1
+    profiles vs_3_0 arbvp1
 
     default_params
     {
@@ -15,6 +15,13 @@ fragment_program cg/NetDensityToAtmTop cg
     source NetDensityToAtmTop.cg
     entry_point PrecomputeNetDensityToAtmTopPS
     profiles ps_3_0 arbfp1
+    default_params
+    {
+        param_named _fEarthRadius          float 6360000.0
+        param_named _fAtmTopRadius         float 6440000.0
+        param_named _fAtmTopHeight         float 80000.0
+        param_named _f2ParticleScaleHeight float2 7994.0 1200.0
+    }
 }
 
 material Material/NetDensityToAtmTop
@@ -34,7 +41,28 @@ material Material/NetDensityToAtmTop
     }
 }
 
-material QuadTestMaterial
+//
+// Just for the verification
+//
+vertex_program cg/NetDensityToAtmTopTestVP cg
+{
+    source NetDensityToAtmTop.cg
+    entry_point NetDensityToAtmTopTestVS
+    profiles vs_3_0 arbfp1
+    default_params
+    {
+        param_named_auto worldViewProj worldviewproj_matrix
+    }
+}
+
+fragment_program cg/NetDensityToAtmTopTestFP cg
+{
+    source NetDensityToAtmTop.cg
+    entry_point NetDensityToAtmTopTestPS
+    profiles ps_3_0 arbfp1
+}
+
+material NetDensityTestMaterial
 {
     technique
     {
@@ -42,8 +70,10 @@ material QuadTestMaterial
         {
             cull_hardware none
             cull_software none
-            depth_check off
             lighting off
+
+            vertex_program_ref   cg/NetDensityToAtmTopTestVP {}
+            fragment_program_ref cg/NetDensityToAtmTopTestFP {}
 
             texture_unit
             {

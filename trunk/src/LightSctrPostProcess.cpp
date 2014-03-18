@@ -4,6 +4,8 @@
 
 using namespace Ogre;
 
+#define NETDENSITY_MATERIAL_NAME "Material/NetDensityToAtmTop"
+
 CLightSctrPostProcess::CLightSctrPostProcess(SceneManager* scnMgr) :
 	m_fTurbidity(1.02f),
 	mSceneMgr(scnMgr)
@@ -37,7 +39,15 @@ void CLightSctrPostProcess::OnCreateDevice()
 	mQuadNode = mSceneMgr->getRootSceneNode()->createChildSceneNode();
 	mQuadNode->attachObject(mQuadEntity);
 	mQuadNode->setPosition(0, 0, -2);
-
+#if 1
+	// setup required GPU parameters
+	MaterialPtr netDensityMaterial = MaterialManager::getSingleton().getByName(NETDENSITY_MATERIAL_NAME);
+	GpuProgramParametersSharedPtr fpParams = netDensityMaterial->getTechnique(0)->getPass(0)->getFragmentProgramParameters();
+	fpParams->setNamedConstant("_fEarthRadius", m_MediaParams.fEarthRadius);
+	fpParams->setNamedConstant("_fAtmTopRadius", m_MediaParams.fAtmTopRadius);
+	fpParams->setNamedConstant("_fAtmTopHeight", m_MediaParams.fAtmTopHeight);
+	fpParams->setNamedConstant("_f2ParticleScaleHeight", m_MediaParams.f2ParticleScaleHeight);
+#endif
 	CreatePrecomputedOpticalDepthTexture();
 
 	// disable till the next render quad
@@ -72,7 +82,7 @@ void CLightSctrPostProcess::RenderQuad(const char* matName, RenderTexture* rt)
 		//fwrite(data, imgSize, 1, fp);
 		float *p = (float *)data;
 		for (size_t i = 0; i < imgSize / 8; i++, p += 2)
-			fprintf(fp, "[%d,%d] %f %f\n", i / 4, i % 4, p[0], p[1]);
+			fprintf(fp, "[%d,%d] %e %e\n", i % 4, i / 4, p[0], p[1]);
 		fclose(fp);
 	}
 	delete[] data;
@@ -87,7 +97,7 @@ bool CLightSctrPostProcess::CreatePrecomputedOpticalDepthTexture()
 		//4, 4,
 		0, PF_FLOAT32_GR, TU_RENDERTARGET);
 
-	RenderQuad("Material/NetDensityToAtmTop", rtTex->getBuffer()->getRenderTarget());
+	RenderQuad(NETDENSITY_MATERIAL_NAME, rtTex->getBuffer()->getRenderTarget());
 
 	return true;
 }

@@ -87,7 +87,7 @@ protected:
 		Ogre::MeshManager::getSingleton().createPlane("QuadPlane2",
 			Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME, quadPlane, 2, 2);
 		Entity* mQuadEntity = mSceneMgr->createEntity("QuadEntity2", "QuadPlane2");
-		mQuadEntity->setMaterialName("QuadTestMaterial");
+		mQuadEntity->setMaterialName("NetDensityTestMaterial");
 		SceneNode* mQuadNode = mSceneMgr->getRootSceneNode()->createChildSceneNode();
 		mQuadNode->attachObject(mQuadEntity);
 		mQuadNode->setPosition(2, 0, -2);
