@@ -1,0 +1,366 @@
+#include "common.fxh"
+
+#define PI 3.1415928f
+
+#define TRAPEZOIDAL_INTEGRATION 1
+#define EARTH_RADIUS 6360000.f
+#define ATM_TOP_HEIGHT 80000.f
+#define ATM_TOP_RADIUS (EARTH_RADIUS+ATM_TOP_HEIGHT)
+#define PARTICLE_SCALE_HEIGHT float2(7994.f, 1200.f)
+#define PRECOMPUTED_SCTR_LUT_DIM float4(32,128,32,16)
+
+uniform float2 _f2WQ;
+uniform float  _fAtmTopHeight;
+uniform float4 _f4RayleighExtinctionCoeff;
+uniform float4 _f4MieExtinctionCoeff;
+uniform float4 _f4AngularRayleighSctrCoeff;
+uniform float4 _f4AngularMieSctrCoeff;
+uniform float4 _f4CS_g;
+
+float GetCosHorizonAnlge(float fHeight)
+{
+    // Due to numeric precision issues, fHeight might sometimes be slightly negative
+    fHeight = max(fHeight, 0);
+    return -sqrt(fHeight * (2*EARTH_RADIUS + fHeight) ) / (EARTH_RADIUS + fHeight);
+}
+
+float TexCoord2ZenithAngle(float fTexCoord, float fHeight, in float fTexDim, float power)
+{
+    float fCosZenithAngle;
+
+    float fCosHorzAngle = GetCosHorizonAnlge(fHeight);
+    if( fTexCoord > 0.5 )
+    {
+        // Remap to [0,1] from the upper half of the texture [0.5 + 0.5/fTexDim, 1 - 0.5/fTexDim]
+        fTexCoord = saturate( (fTexCoord - (0.5f + 0.5f / fTexDim)) * fTexDim / (fTexDim/2 - 1) );
+        fTexCoord = pow(fTexCoord, 1/power);
+        // Assure that the ray does NOT hit Earth
+        fCosZenithAngle = max( (fCosHorzAngle + fTexCoord * (1 - fCosHorzAngle)), fCosHorzAngle + 1e-4);
+    }
+    else
+    {
+        // Remap to [0,1] from the lower half of the texture [0.5, 0.5 - 0.5/fTexDim]
+        fTexCoord = saturate((fTexCoord - 0.5f / fTexDim) * fTexDim / (fTexDim/2 - 1));
+        fTexCoord = pow(fTexCoord, 1/power);
+        // Assure that the ray DOES hit Earth
+        fCosZenithAngle = min( (fCosHorzAngle - fTexCoord * (fCosHorzAngle - (-1))), fCosHorzAngle - 1e-4);
+    }
+    return fCosZenithAngle;
+}
+
+static const float SafetyHeightMargin = 16.f;
+#define NON_LINEAR_PARAMETERIZATION 1
+static const float HeightPower = 0.5f;
+static const float ViewZenithPower = 0.2;
+static const float SunViewPower = 1.5f;
+
+void InsctrLUTCoords2WorldParams(in float4 f4UVWQ,
+                                 out float fHeight,
+                                 out float fCosViewZenithAngle,
+                                 out float fCosSunZenithAngle,
+                                 out float fCosSunViewAngle)
+{
+#if NON_LINEAR_PARAMETERIZATION
+    // Rescale to exactly 0,1 range
+    f4UVWQ.xzw = saturate((f4UVWQ* PRECOMPUTED_SCTR_LUT_DIM - 0.5) / (PRECOMPUTED_SCTR_LUT_DIM-1)).xzw;
+
+    f4UVWQ.x = pow( f4UVWQ.x, 1/HeightPower );
+    // Allowable height range is limited to [SafetyHeightMargin, AtmTopHeight - SafetyHeightMargin] to
+    // avoid numeric issues at the Earth surface and the top of the atmosphere
+    fHeight = f4UVWQ.x * (_fAtmTopHeight - 2*SafetyHeightMargin) + SafetyHeightMargin;
+
+    fCosViewZenithAngle = TexCoord2ZenithAngle(f4UVWQ.y, fHeight, PRECOMPUTED_SCTR_LUT_DIM.y, ViewZenithPower);
+    
+    // Use Eric Bruneton's formula for cosine of the sun-zenith angle
+    fCosSunZenithAngle = tan((2.0 * f4UVWQ.z - 1.0 + 0.26) * 1.1) / tan(1.26 * 1.1);
+
+    f4UVWQ.w = sign(f4UVWQ.w - 0.5) * pow( abs((f4UVWQ.w - 0.5)*2), 1/SunViewPower)/2 + 0.5;
+    fCosSunViewAngle = cos(f4UVWQ.w*PI);
+#else
+    // Rescale to exactly 0,1 range
+    f4UVWQ = (f4UVWQ * PRECOMPUTED_SCTR_LUT_DIM - 0.5) / (PRECOMPUTED_SCTR_LUT_DIM-1);
+
+    // Allowable height range is limited to [SafetyHeightMargin, AtmTopHeight - SafetyHeightMargin] to
+    // avoid numeric issues at the Earth surface and the top of the atmosphere
+    fHeight = f4UVWQ.x * (_fAtmTopHeight - 2*SafetyHeightMargin) + SafetyHeightMargin;
+
+    fCosViewZenithAngle = f4UVWQ.y * 2 - 1;
+    fCosSunZenithAngle  = f4UVWQ.z * 2 - 1;
+    fCosSunViewAngle    = f4UVWQ.w * 2 - 1;
+#endif
+
+    fCosViewZenithAngle = clamp(fCosViewZenithAngle, -1, +1);
+    fCosSunZenithAngle  = clamp(fCosSunZenithAngle,  -1, +1);
+    // Compute allowable range for the cosine of the sun view angle for the given
+    // view zenith and sun zenith angles
+    float D = (1.0 - fCosViewZenithAngle * fCosViewZenithAngle) * (1.0 - fCosSunZenithAngle  * fCosSunZenithAngle);
+    
+    // !!!!  IMPORTANT NOTE regarding NVIDIA hardware !!!!
+
+    // There is a very weird issue on NVIDIA hardware with clamp(), saturate() and min()/max() 
+    // functions. No matter what function is used, fCosViewZenithAngle and fCosSunZenithAngle
+    // can slightly fall outside [-1,+1] range causing D to be negative
+    // Using saturate(D), max(D, 0) and even D>0?D:0 does not work!
+    // The only way to avoid taking the square root of negative value and obtaining NaN is 
+    // to use max() with small positive value:
+    D = sqrt( max(D, 1e-20) );
+    
+    // The issue was reproduceable on NV GTX 680, driver version 9.18.13.2723 (9/12/2013).
+    // The problem does not arise on Intel hardware
+
+    float2 f2MinMaxCosSunViewAngle = fCosViewZenithAngle*fCosSunZenithAngle + float2(-D, +D);
+    // Clamp to allowable range
+    fCosSunViewAngle    = clamp(fCosSunViewAngle, f2MinMaxCosSunViewAngle.x, f2MinMaxCosSunViewAngle.y);
+}
+
+uniform sampler2D g_tex2DOccludedNetDensityToAtmTop: register(s0);
+
+float2 GetNetParticleDensity(in float fHeightAboveSurface,
+                             in float fCosZenithAngle)
+{
+    float fRelativeHeightAboveSurface = fHeightAboveSurface / ATM_TOP_HEIGHT;
+    return tex2D(g_tex2DOccludedNetDensityToAtmTop, float2(fRelativeHeightAboveSurface, fCosZenithAngle*0.5+0.5)).xy;
+}
+
+float2 GetNetParticleDensity(in float3 f3Pos,
+                             in float3 f3EarthCentre,
+                             in float3 f3RayDir)
+{
+    float3 f3EarthCentreToPointDir = f3Pos - f3EarthCentre;
+    float fDistToEarthCentre = length(f3EarthCentreToPointDir);
+    f3EarthCentreToPointDir /= fDistToEarthCentre;
+    float fHeightAboveSurface = fDistToEarthCentre - EARTH_RADIUS;
+    float fCosZenithAngle = dot( f3EarthCentreToPointDir, f3RayDir );
+    return GetNetParticleDensity(fHeightAboveSurface, fCosZenithAngle);
+}
+
+// This function computes atmospheric properties in the given point
+void GetAtmosphereProperties(in float3 f3Pos,
+                             in float3 f3EarthCentre,
+                             in float3 f3DirOnLight,
+                             out float2 f2ParticleDensity,
+                             out float2 f2NetParticleDensityToAtmTop)
+{
+    // Calculate the point height above the SPHERICAL Earth surface:
+    float3 f3EarthCentreToPointDir = f3Pos - f3EarthCentre;
+    float fDistToEarthCentre = length(f3EarthCentreToPointDir);
+    f3EarthCentreToPointDir /= fDistToEarthCentre;
+    float fHeightAboveSurface = fDistToEarthCentre - EARTH_RADIUS;
+
+    f2ParticleDensity = exp( -fHeightAboveSurface / PARTICLE_SCALE_HEIGHT );
+
+    // Get net particle density from the integration point to the top of the atmosphere:
+    float fCosSunZenithAngleForCurrPoint = dot( f3EarthCentreToPointDir, f3DirOnLight );
+    f2NetParticleDensityToAtmTop = GetNetParticleDensity(fHeightAboveSurface, fCosSunZenithAngleForCurrPoint);
+}
+
+// This function computes differential inscattering for the given particle densities 
+// (without applying phase functions)
+void ComputePointDiffInsctr(in float2 f2ParticleDensityInCurrPoint,
+                            in float2 f2NetParticleDensityFromCam,
+                            in float2 f2NetParticleDensityToAtmTop,
+                            out float3 f3DRlghInsctr,
+                            out float3 f3DMieInsctr)
+{
+    // Compute total particle density from the top of the atmosphere through the integraion point to camera
+    float2 f2TotalParticleDensity = f2NetParticleDensityFromCam + f2NetParticleDensityToAtmTop;
+        
+    // Get optical depth
+    float3 f3TotalRlghOpticalDepth = _f4RayleighExtinctionCoeff.rgb * f2TotalParticleDensity.x;
+    float3 f3TotalMieOpticalDepth  = _f4MieExtinctionCoeff.rgb      * f2TotalParticleDensity.y;
+        
+    // And total extinction for the current integration point:
+    float3 f3TotalExtinction = exp( -(f3TotalRlghOpticalDepth + f3TotalMieOpticalDepth) );
+
+    f3DRlghInsctr = f2ParticleDensityInCurrPoint.x * f3TotalExtinction;
+    f3DMieInsctr  = f2ParticleDensityInCurrPoint.y * f3TotalExtinction; 
+}
+
+void ComputeInsctrIntegral(in float3 f3RayStart,
+                           in float3 f3RayEnd,
+                           in float3 f3EarthCentre,
+                           in float3 f3DirOnLight,
+                           inout float2 f2NetParticleDensityFromCam,
+                           inout float3 f3RayleighInscattering,
+                           inout float3 f3MieInscattering,
+                           uniform const float fNumSteps)
+{
+    float3 f3Step = (f3RayEnd - f3RayStart) / fNumSteps;
+    float fStepLen = length(f3Step);
+
+#if TRAPEZOIDAL_INTEGRATION
+    // For trapezoidal integration we need to compute some variables for the starting point of the ray
+    float2 f2PrevParticleDensity = 0;
+    float2 f2NetParticleDensityToAtmTop = 0;
+    GetAtmosphereProperties(f3RayStart, f3EarthCentre, f3DirOnLight, f2PrevParticleDensity, f2NetParticleDensityToAtmTop);
+
+    float3 f3PrevDiffRInsctr = 0, f3PrevDiffMInsctr = 0;
+    ComputePointDiffInsctr(f2PrevParticleDensity, f2NetParticleDensityFromCam, f2NetParticleDensityToAtmTop, f3PrevDiffRInsctr, f3PrevDiffMInsctr);
+#endif
+
+
+#if TRAPEZOIDAL_INTEGRATION
+    // With trapezoidal integration, we will evaluate the function at the end of each section and 
+    // compute area of a trapezoid
+    for(float fStepNum = 1.f; fStepNum <= fNumSteps; fStepNum += 1.f)
+#else
+    // With stair-step integration, we will evaluate the function at the middle of each section and 
+    // compute area of a rectangle
+    for(float fStepNum = 0.5f; fStepNum < fNumSteps; fStepNum += 1.f)
+#endif
+    {
+        float3 f3CurrPos = f3RayStart + f3Step * fStepNum;
+        float2 f2ParticleDensity, f2NetParticleDensityToAtmTop;
+        GetAtmosphereProperties(f3CurrPos, f3EarthCentre, f3DirOnLight, f2ParticleDensity, f2NetParticleDensityToAtmTop);
+
+        // Accumulate net particle density from the camera to the integration point:
+#if TRAPEZOIDAL_INTEGRATION
+        f2NetParticleDensityFromCam += (f2PrevParticleDensity + f2ParticleDensity) * (fStepLen / 2.f);
+        f2PrevParticleDensity = f2ParticleDensity;
+#else
+        f2NetParticleDensityFromCam += f2ParticleDensity * fStepLen;
+#endif
+
+        float3 f3DRlghInsctr, f3DMieInsctr;
+        ComputePointDiffInsctr(f2ParticleDensity, f2NetParticleDensityFromCam, f2NetParticleDensityToAtmTop, f3DRlghInsctr, f3DMieInsctr);
+
+#if TRAPEZOIDAL_INTEGRATION
+        f3RayleighInscattering += (f3DRlghInsctr + f3PrevDiffRInsctr) * (fStepLen / 2.f);
+        f3MieInscattering      += (f3DMieInsctr  + f3PrevDiffMInsctr) * (fStepLen / 2.f);
+
+        f3PrevDiffRInsctr = f3DRlghInsctr;
+        f3PrevDiffMInsctr = f3DMieInsctr;
+#else
+        f3RayleighInscattering += f3DRlghInsctr * fStepLen;
+        f3MieInscattering      += f3DMieInsctr * fStepLen;
+#endif
+    }
+}
+
+void ApplyPhaseFunctions(inout float3 f3RayleighInscattering,
+                         inout float3 f3MieInscattering,
+                         in float cosTheta)
+{
+    f3RayleighInscattering *= _f4AngularRayleighSctrCoeff.rgb * (1.0 + cosTheta*cosTheta);
+    
+    // Apply Cornette-Shanks phase function (see Nishita et al. 93):
+    // F(theta) = 1/(4*PI) * 3*(1-g^2) / (2*(2+g^2)) * (1+cos^2(theta)) / (1 + g^2 - 2g*cos(theta))^(3/2)
+    // f4CS_g = ( 3*(1-g^2) / (2*(2+g^2)), 1+g^2, -2g, 1 )
+    float fDenom = rsqrt( dot(_f4CS_g.yz, float2(1.f, cosTheta)) ); // 1 / (1 + g^2 - 2g*cos(theta))^(1/2)
+    float fCornettePhaseFunc = _f4CS_g.x * (fDenom*fDenom*fDenom) * (1 + cosTheta*cosTheta);
+    f3MieInscattering *= _f4AngularMieSctrCoeff.rgb * fCornettePhaseFunc;
+}
+
+void IntegrateUnshadowedInscattering(in float3 f3RayStart, 
+                                     in float3 f3RayEnd,
+                                     in float3 f3ViewDir,
+                                     in float3 f3EarthCentre,
+                                     in float3 f3DirOnLight,
+                                     uniform const float fNumSteps,
+                                     out float3 f3Inscattering,
+                                     out float3 f3Extinction)
+{
+    float2 f2NetParticleDensityFromCam = 0;
+    float3 f3RayleighInscattering = 0;
+    float3 f3MieInscattering = 0;
+    ComputeInsctrIntegral( f3RayStart,
+                           f3RayEnd,
+                           f3EarthCentre,
+                           f3DirOnLight,
+                           f2NetParticleDensityFromCam,
+                           f3RayleighInscattering,
+                           f3MieInscattering,
+                           fNumSteps);
+
+    float3 f3TotalRlghOpticalDepth = _f4RayleighExtinctionCoeff.rgb * f2NetParticleDensityFromCam.x;
+    float3 f3TotalMieOpticalDepth  = _f4MieExtinctionCoeff.rgb      * f2NetParticleDensityFromCam.y;
+    f3Extinction = exp( -(f3TotalRlghOpticalDepth + f3TotalMieOpticalDepth) );
+
+    // Apply phase function
+    // Note that cosTheta = dot(DirOnCamera, LightDir) = dot(ViewDir, DirOnLight) because
+    // DirOnCamera = -ViewDir and LightDir = -DirOnLight
+    float cosTheta = dot(f3ViewDir, f3DirOnLight);
+    ApplyPhaseFunctions(f3RayleighInscattering, f3MieInscattering, cosTheta);
+
+    f3Inscattering = f3RayleighInscattering + f3MieInscattering;
+}
+
+float3 ComputeViewDir(in float fCosViewZenithAngle)
+{
+    return float3(sqrt(saturate(1 - fCosViewZenithAngle*fCosViewZenithAngle)), fCosViewZenithAngle, 0);
+}
+
+float3 ComputeLightDir(in float3 f3ViewDir, in float fCosSunZenithAngle, in float fCosSunViewAngle)
+{
+    float3 f3DirOnLight;
+    f3DirOnLight.x = (f3ViewDir.x > 0) ? (fCosSunViewAngle - fCosSunZenithAngle * f3ViewDir.y) / f3ViewDir.x : 0;
+    f3DirOnLight.y = fCosSunZenithAngle;
+    f3DirOnLight.z = sqrt( saturate(1 - dot(f3DirOnLight.xy, f3DirOnLight.xy)) );
+    // Do not normalize f3DirOnLight! Even if its length is not exactly 1 (which can 
+    // happen because of fp precision issues), all the dot products will still be as 
+    // specified, which is essentially important. If we normalize the vector, all the 
+    // dot products will deviate, resulting in wrong pre-computation.
+    // Since fCosSunViewAngle is clamped to allowable range, f3DirOnLight should always
+    // be normalized. However, due to some issues on NVidia hardware sometimes
+    // it may not be as that (see IMPORTANT NOTE regarding NVIDIA hardware)
+    //f3DirOnLight = normalize(f3DirOnLight);
+    return f3DirOnLight;
+}
+
+struct OUTPUT3
+{
+    float3 color;
+};
+
+// This shader pre-computes the radiance of single scattering at a given point in given
+// direction.
+OUTPUT3 PrecomputeSingleScatteringPS(float2 f2UV)
+{
+    // Get attributes for the current point
+    //float2 f2UV = ProjToUV(In.m_f2PosPS);
+    float fHeight, fCosViewZenithAngle, fCosSunZenithAngle, fCosSunViewAngle;
+    InsctrLUTCoords2WorldParams(float4(f2UV, _f2WQ), fHeight, fCosViewZenithAngle, fCosSunZenithAngle, fCosSunViewAngle );
+    float3 f3EarthCentre =  - float3(0,1,0) * EARTH_RADIUS;
+    float3 f3RayStart = float3(0, fHeight, 0);
+    float3 f3ViewDir = ComputeViewDir(fCosViewZenithAngle);
+    float3 f3DirOnLight = ComputeLightDir(f3ViewDir, fCosSunZenithAngle, fCosSunViewAngle);
+  
+    // Intersect view ray with the top of the atmosphere and the Earth
+    float4 f4Isecs;
+    GetRaySphereIntersection2( f3RayStart, f3ViewDir, f3EarthCentre, 
+                               float2(EARTH_RADIUS, ATM_TOP_RADIUS), 
+                               f4Isecs);
+    float2 f2RayEarthIsecs  = f4Isecs.xy;
+    float2 f2RayAtmTopIsecs = f4Isecs.zw;
+
+    if(f2RayAtmTopIsecs.y <= 0)
+    {
+        OUTPUT3 o;
+        o.color = 0;
+        return o; // This is just a sanity check and should never happen
+                  // as the start point is always under the top of the 
+                  // atmosphere (look at InsctrLUTCoords2WorldParams())
+    }
+
+    // Set the ray length to the distance to the top of the atmosphere
+    float fRayLength = f2RayAtmTopIsecs.y;
+    // If ray hits Earth, limit the length by the distance to the surface
+    if(f2RayEarthIsecs.x > 0)
+        fRayLength = min(fRayLength, f2RayEarthIsecs.x);
+    
+    float3 f3RayEnd = f3RayStart + f3ViewDir * fRayLength;
+
+    // Integrate single-scattering
+    float3 f3Inscattering, f3Extinction;
+    IntegrateUnshadowedInscattering(f3RayStart, 
+                                    f3RayEnd,
+                                    f3ViewDir,
+                                    f3EarthCentre,
+                                    f3DirOnLight.xyz,
+                                    100,
+                                    f3Inscattering,
+                                    f3Extinction);
+    OUTPUT3 o;
+    o.color = f3Inscattering;
+    return o;
+}

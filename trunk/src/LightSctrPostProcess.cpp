@@ -4,7 +4,8 @@
 
 using namespace Ogre;
 
-#define NETDENSITY_MATERIAL_NAME "Material/NetDensityToAtmTop"
+#define NETDENSITY_MATERIAL_NAME		"Material/NetDensityToAtmTop"
+#define SINGLE_SCATTER_MATERIAL_NAME	"Material/SingleScattering"
 
 CLightSctrPostProcess::CLightSctrPostProcess(SceneManager* scnMgr) :
 	m_fTurbidity(1.02f),
@@ -49,6 +50,7 @@ void CLightSctrPostProcess::OnCreateDevice()
 	fpParams->setNamedConstant("_f2ParticleScaleHeight", m_MediaParams.f2ParticleScaleHeight);
 #endif
 	CreatePrecomputedOpticalDepthTexture();
+	CreatePrecomputedScatteringLUT();
 
 	// disable till the next render quad
 	mQuadNode->setVisible(false);
@@ -97,7 +99,47 @@ bool CLightSctrPostProcess::CreatePrecomputedOpticalDepthTexture()
 		//4, 4,
 		0, PF_FLOAT32_GR, TU_RENDERTARGET);
 
+	if (rtTex.isNull())
+		return false;
+
 	RenderQuad(NETDENSITY_MATERIAL_NAME, rtTex->getBuffer()->getRenderTarget());
+
+	return true;
+}
+
+bool CLightSctrPostProcess::CreatePrecomputedScatteringLUT()
+{
+	UINT texDepth = sm_iPrecomputedSctrWDim * sm_iPrecomputedSctrQDim;
+	TexturePtr rtSingleSctr3D = TextureManager::getSingleton().createManual("SingleSctrTex3D",
+		ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME, TEX_TYPE_3D,
+		sm_iPrecomputedSctrUDim, sm_iPrecomputedSctrVDim, texDepth,
+		0, PF_FLOAT16_RGBA, TU_RENDERTARGET);
+
+	if (rtSingleSctr3D.isNull())
+		return false;
+
+	GpuProgramParametersSharedPtr fpParams = 
+		MaterialManager::getSingleton().getByName(SINGLE_SCATTER_MATERIAL_NAME)->getTechnique(0)->getPass(0)->getFragmentProgramParameters();
+
+	fpParams->setNamedConstant("_fAtmTopHeight", m_MediaParams.fAtmTopHeight);
+	fpParams->setNamedConstant("_f4RayleighExtinctionCoeff", m_MediaParams.f4RayleighExtinctionCoeff);
+	fpParams->setNamedConstant("_f4MieExtinctionCoeff", m_MediaParams.f4MieExtinctionCoeff);
+	fpParams->setNamedConstant("_f4AngularRayleighSctrCoeff", m_MediaParams.f4AngularRayleighSctrCoeff);
+	fpParams->setNamedConstant("_f4AngularMieSctrCoeff", m_MediaParams.f4AngularMieSctrCoeff);
+	fpParams->setNamedConstant("_f4CS_g", m_MediaParams.f4CS_g);
+
+	// Precompute single scattering
+	for (UINT uiDepthSlice = 0; uiDepthSlice < texDepth; ++uiDepthSlice)
+	{
+		// Set sun zenith and sun view angles
+		UINT uiW = uiDepthSlice % sm_iPrecomputedSctrWDim;
+		UINT uiQ = uiDepthSlice / sm_iPrecomputedSctrWDim;
+		Vector2 f2WQ;
+		f2WQ.x = ((float)uiW + 0.5f) / (float)sm_iPrecomputedSctrWDim;
+		f2WQ.y = ((float)uiQ + 0.5f) / (float)sm_iPrecomputedSctrQDim;
+		fpParams->setNamedConstant("_f2WQ", f2WQ);
+		RenderQuad(SINGLE_SCATTER_MATERIAL_NAME, rtSingleSctr3D->getBuffer()->getRenderTarget(uiDepthSlice));
+	}
 
 	return true;
 }
