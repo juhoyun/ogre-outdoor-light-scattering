@@ -14,7 +14,7 @@ fragment_program cg/NetDensityToAtmTop cg
 {
     source NetDensityToAtmTop.cg
     entry_point PrecomputeNetDensityToAtmTopPS
-    profiles ps_3_0 arbfp1
+    profiles ps_3_0 fp40
     default_params
     {
         param_named _fEarthRadius          float 6360000.0
@@ -48,7 +48,7 @@ vertex_program cg/NetDensityToAtmTopTestVP cg
 {
     source NetDensityToAtmTop.cg
     entry_point NetDensityToAtmTopTestVS
-    profiles vs_3_0 arbfp1
+    profiles vs_3_0 arbvp1
     default_params
     {
         param_named_auto worldViewProj worldviewproj_matrix
@@ -59,7 +59,7 @@ fragment_program cg/NetDensityToAtmTopTestFP cg
 {
     source NetDensityToAtmTop.cg
     entry_point NetDensityToAtmTopTestPS
-    profiles ps_3_0 arbfp1
+    profiles ps_3_0 fp30
 }
 
 material NetDensityTestMaterial
